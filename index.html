@@ -5,47 +5,44 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 async function init() {
   const params = new URLSearchParams(window.location.search);
   const routeId = params.get('id');
+  const loading = document.getElementById('loading');
 
   if (!routeId) {
-    document.getElementById('loading').innerText = 'Error: No se encontró el ID de la ruta.';
+    loading.innerText = 'Error: ID no encontrado.';
     return;
   }
 
   try {
-    // 2. Consultar a Supabase (Forzamos GeoJSON para el mapa)
     const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Accept': 'application/geo+json', // 🚀 Clave para que PostGIS envíe el mapa listo
-        'Prefer': 'plurality=singular'   // 🚀 Clave para recibir un objeto, no un array
+        'Accept': 'application/geo+json', // Formato oficial de mapas
+        'Prefer': 'plurality=singular'   // Un solo objeto, no una lista
       }
     });
 
-    if (!response.ok) throw new Error("Error en la respuesta de la base de datos");
-    
+    if (!response.ok) throw new Error("Error en Supabase");
     const data = await response.json();
 
-    if (!data) {
-      document.getElementById('loading').innerText = 'La ruta no existe.';
-      return;
-    }
+    // 🚀 EXPLICACIÓN: Con 'application/geo+json', los datos están en 'properties'
+    const props = data.properties || data; 
+    const geometry = data.geometry || data.track_line;
 
-    // 3. Pintar Datos con Seguridad (Si no hay stats, ponemos ---)
-    document.getElementById('r-name').innerText = data.name || 'Ruta Compartida';
-    document.getElementById('r-desc').innerText = data.description || '';
+    // 1. Pintar Textos
+    document.getElementById('r-name').innerText = props.name || 'Ruta PasoApp';
+    document.getElementById('r-desc').innerText = props.description || '';
     
-    // Usamos encadenamiento opcional (?.) para evitar el error de "undefined"
-    const dist = data.stats?.distance ? data.stats.distance.toFixed(2) : '---';
-    const ele = data.stats?.elevationGain ? Math.round(data.stats.elevationGain) : '---';
-    
-    document.getElementById('r-dist').innerHTML = `${dist} <span>km</span>`;
-    document.getElementById('r-ele').innerHTML = `+${ele} <span>m</span>`;
+    // Stats con seguridad
+    const d = props.stats?.distance ? props.stats.distance.toFixed(2) : '---';
+    const e = props.stats?.elevationGain ? Math.round(props.stats.elevationGain) : '---';
+    document.getElementById('r-dist').innerHTML = `${d} <span>km</span>`;
+    document.getElementById('r-ele').innerHTML = `+${e} <span>m</span>`;
 
+    loading.style.display = 'none';
     document.getElementById('info-card').style.display = 'block';
-    document.getElementById('loading').style.display = 'none';
 
-    // 4. Configurar OpenLayers
+    // 2. Dibujar Mapa
     const map = new ol.Map({
       target: 'map',
       layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
@@ -53,8 +50,8 @@ async function init() {
       controls: []
     });
 
-    // Leemos la geometría del track_line
-    const feature = new ol.format.GeoJSON().readFeature(data.track_line, {
+    // 🚀 LA CLAVE: Le pasamos el objeto 'data' entero porque YA ES un GeoJSON
+    const feature = new ol.format.GeoJSON().readFeature(data, {
       dataProjection: 'EPSG:4326',
       featureProjection: 'EPSG:3857'
     });
@@ -63,19 +60,17 @@ async function init() {
       stroke: new ol.style.Stroke({ color: '#2dd36f', width: 6 })
     }));
 
-    const vectorSource = new ol.source.Vector({ features: [feature] });
-    map.addLayer(new ol.layer.Vector({ source: vectorSource }));
-
-    // Zoom automático a la ruta
-    map.getView().fit(vectorSource.getExtent(), {
-      padding: [60, 60, 180, 60],
-      duration: 1000
+    const source = new ol.source.Vector({ features: [feature] });
+    map.addLayer(new ol.layer.Vector({ source: source }));
+    
+    // Zoom a la ruta
+    map.getView().fit(source.getExtent(), { 
+      padding: [60, 60, 200, 60], 
+      duration: 1000 
     });
 
   } catch (error) {
-    console.error('Detalle:', error);
-    document.getElementById('loading').innerHTML = `⚠️ Error al cargar datos.<br><small>${error.message}</small>`;
+    console.error('Error:', error);
+    loading.innerText = 'Error al procesar la ruta.';
   }
 }
-
-init();
