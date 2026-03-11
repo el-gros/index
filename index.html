@@ -1,128 +1,81 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PasoApp - Visor de Ruta</title>
-  
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+// --- 1. CONFIGURACIÓN SUPABASE ---
+const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
 
-  <style>
-    body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: 'Inter', sans-serif; background-color: #f4f4f4; overflow: hidden; }
-    #map { width: 100vw; height: 100vh; position: absolute; }
-    #info-card {
-      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 400px;
-      background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-      border-radius: 24px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15); padding: 20px; box-sizing: border-box;
-      display: none; z-index: 1000;
-    }
-    .title { font-size: 1.1rem; font-weight: 800; color: #333; margin: 0 0 5px 0; }
-    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .stat-box { background: rgba(0,0,0,0.03); padding: 10px; border-radius: 12px; }
-    .stat-label { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: #888; display: block; }
-    .stat-val { font-size: 0.95rem; font-weight: 600; color: #2dd36f; font-family: monospace; }
-    #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: 600; background: white; padding: 10px 20px; border-radius: 20px; z-index: 2000; }
-  </style>
-</head>
-<body>
+async function init() {
+  const params = new URLSearchParams(window.location.search);
+  const routeId = params.get('id');
 
-  <div id="loading">Cargando ruta...</div>
-  <div id="map"></div>
+  if (!routeId) {
+    document.getElementById('loading').innerText = 'Error: No se encontró el ID de la ruta.';
+    return;
+  }
 
-  <div id="info-card">
-    <h2 class="title" id="r-name">Ruta</h2>
-    <div class="stats-grid">
-      <div class="stat-box">
-        <span class="stat-label">Distancia</span>
-        <span class="stat-val"><span id="r-dist">---</span> km</span>
-      </div>
-      <div class="stat-box">
-        <span class="stat-label">Desnivel</span>
-        <span class="stat-val">+<span id="r-ele">---</span> m</span>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
-
-  <script>
-    // --- 1. CONFIGURACIÓN (Corregida) ---
-    const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
-
-    async function init() {
-      const params = new URLSearchParams(window.location.search);
-      const routeId = params.get('id');
-
-      if (!routeId) {
-        document.getElementById('loading').innerText = 'Error: No hay ID de ruta.';
-        return;
+  try {
+    // 2. Consultar a Supabase (Forzamos GeoJSON para el mapa)
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Accept': 'application/geo+json', // 🚀 Clave para que PostGIS envíe el mapa listo
+        'Prefer': 'plurality=singular'   // 🚀 Clave para recibir un objeto, no un array
       }
+    });
 
-      try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Accept': 'application/geo+json', // Pedimos GeoJSON para evitar errores de formato
-            'Prefer': 'plurality=singular'   // Obtenemos el objeto directamente
-          }
-        });
+    if (!response.ok) throw new Error("Error en la respuesta de la base de datos");
+    
+    const data = await response.json();
 
-        if (!response.ok) throw new Error("Error en la respuesta de Supabase");
-        const route = await response.json();
-
-        if (!route) {
-          document.getElementById('loading').innerText = 'Ruta no encontrada.';
-          return;
-        }
-
-        // 2. Pintar Datos con seguridad (Null-safe)
-        document.getElementById('r-name').innerText = route.name || 'Ruta Compartida';
-        
-        if (route.stats) {
-          document.getElementById('r-dist').innerText = route.stats.distance ? route.stats.distance.toFixed(2) : '---';
-          document.getElementById('r-ele').innerText = route.stats.elevationGain ? Math.round(route.stats.elevationGain) : '---';
-        }
-
-        document.getElementById('info-card').style.display = 'block';
-        document.getElementById('loading').style.display = 'none';
-
-        // 3. Configurar Mapa
-        const map = new ol.Map({
-          target: 'map',
-          layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
-          view: new ol.View({ center: [0, 0], zoom: 2 }),
-          controls: []
-        });
-
-        // Leemos la geometría
-        const feature = new ol.format.GeoJSON().readFeature(route.track_line, {
-          dataProjection: 'EPSG:4326',
-          featureProjection: 'EPSG:3857'
-        });
-
-        feature.setStyle(new ol.style.Style({
-          stroke: new ol.style.Stroke({ color: '#2dd36f', width: 6 })
-        }));
-
-        const vectorSource = new ol.source.Vector({ features: [feature] });
-        map.addLayer(new ol.layer.Vector({ source: vectorSource }));
-
-        // Ajustar zoom
-        map.getView().fit(vectorSource.getExtent(), {
-          padding: [50, 50, 150, 50],
-          duration: 1000
-        });
-
-      } catch (error) {
-          console.error('Detalle:', error);
-          document.getElementById('loading').innerHTML = `⚠️ Error de carga.<br><small>${error.message}</small>`;
-      }
+    if (!data) {
+      document.getElementById('loading').innerText = 'La ruta no existe.';
+      return;
     }
 
-    init();
-  </script>
-</body>
-</html>
+    // 3. Pintar Datos con Seguridad (Si no hay stats, ponemos ---)
+    document.getElementById('r-name').innerText = data.name || 'Ruta Compartida';
+    document.getElementById('r-desc').innerText = data.description || '';
+    
+    // Usamos encadenamiento opcional (?.) para evitar el error de "undefined"
+    const dist = data.stats?.distance ? data.stats.distance.toFixed(2) : '---';
+    const ele = data.stats?.elevationGain ? Math.round(data.stats.elevationGain) : '---';
+    
+    document.getElementById('r-dist').innerHTML = `${dist} <span>km</span>`;
+    document.getElementById('r-ele').innerHTML = `+${ele} <span>m</span>`;
+
+    document.getElementById('info-card').style.display = 'block';
+    document.getElementById('loading').style.display = 'none';
+
+    // 4. Configurar OpenLayers
+    const map = new ol.Map({
+      target: 'map',
+      layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
+      view: new ol.View({ center: [0, 0], zoom: 2 }),
+      controls: []
+    });
+
+    // Leemos la geometría del track_line
+    const feature = new ol.format.GeoJSON().readFeature(data.track_line, {
+      dataProjection: 'EPSG:4326',
+      featureProjection: 'EPSG:3857'
+    });
+
+    feature.setStyle(new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: '#2dd36f', width: 6 })
+    }));
+
+    const vectorSource = new ol.source.Vector({ features: [feature] });
+    map.addLayer(new ol.layer.Vector({ source: vectorSource }));
+
+    // Zoom automático a la ruta
+    map.getView().fit(vectorSource.getExtent(), {
+      padding: [60, 60, 180, 60],
+      duration: 1000
+    });
+
+  } catch (error) {
+    console.error('Detalle:', error);
+    document.getElementById('loading').innerHTML = `⚠️ Error al cargar datos.<br><small>${error.message}</small>`;
+  }
+}
+
+init();
