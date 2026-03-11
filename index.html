@@ -102,79 +102,43 @@
         return;
       }
 
-      try {
-        // 3. Consultar a Supabase mediante su API REST (Súper ligero)
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=name,description,track_line,stats`, {
-          headers: {
-            'apikey': SUPABASE_KEY,
-            'Authorization': `Bearer ${SUPABASE_KEY}`
-          }
-        });
+ try {
+    const cleanUrl = S_URL.trim().replace(/\/$/, "");
+    const endpoint = `${cleanUrl}/rest/v1/shared_routes?id=eq.${id}&select=*`;
 
-        const data = await response.json();
-
-        if (!data || data.length === 0) {
-          document.getElementById('loading').innerText = 'La ruta ha caducado o no existe.';
-          return;
+    const res = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+            'apikey': S_KEY.trim(),
+            'Authorization': `Bearer ${S_KEY.trim()}`,
+            // 💡 Probamos primero sin el header de GeoJSON para ver si el JSON estándar llega bien
+            'Accept': 'application/json', 
+            'Prefer': 'plurality=singular'
         }
+    });
 
-        const route = data[0];
+    // 🔍 PASO CRUCIAL: Ver qué ha llegado antes de parsear
+    const rawText = await res.text(); 
+    console.log("Respuesta bruta del servidor:", rawText);
 
-        // 4. Pintar Datos en la Interfaz
-        document.getElementById('r-name').innerText = route.name;
-        document.getElementById('r-desc').innerText = route.description || 'Sin descripción';
-        
-        if (route.stats) {
-          const distKm = route.stats.distance ? (route.stats.distance).toFixed(2) : '0';
-          const eleGain = route.stats.elevationGain ? Math.round(route.stats.elevationGain) : '0';
-          
-          document.getElementById('r-dist').innerHTML = `${distKm} <span>km</span>`;
-          document.getElementById('r-ele').innerHTML = `+${eleGain} <span>m</span>`;
-        }
-
-        // Mostrar la tarjeta y ocultar el loading
-        document.getElementById('info-card').style.display = 'block';
-        document.getElementById('loading').style.display = 'none';
-
-        // 5. Configurar OpenLayers
-        // Convertimos el WKT (Well-Known Text) de PostGIS a formato EPSG:3857 (Mercator, estándar web)
-        const format = new ol.format.WKT();
-        const feature = format.readFeature(route.track_line, {
-          dataProjection: 'EPSG:4326', // GPS estándar
-          featureProjection: 'EPSG:3857' // Mapa web
-        });
-
-        // Aplicamos el estilo de línea verde de PasoApp
-        feature.setStyle(new ol.style.Style({
-          stroke: new ol.style.Stroke({ color: '#2dd36f', width: 5 })
-        }));
-
-        const vectorSource = new ol.source.Vector({ features: [feature] });
-        const vectorLayer = new ol.layer.Vector({ source: vectorSource });
-
-        // Inicializamos el mapa con el estilo de OSM
-        const map = new ol.Map({
-          target: 'map',
-          layers: [
-            new ol.layer.Tile({ source: new ol.source.OSM() }),
-            vectorLayer
-          ],
-          view: new ol.View({ center: [0, 0], zoom: 2 }),
-          controls: [] // Quitamos los controles de zoom para que se vea más limpio en móvil
-        });
-
-        // 6. Hacer zoom a la ruta añadiendo un margen padding para que no se pegue a los bordes
-        map.getView().fit(vectorSource.getExtent(), {
-          padding: [80, 50, 200, 50], // Más padding abajo para la tarjeta flotante
-          duration: 1000
-        });
-
-      } catch (error) {
-        console.error('Error cargando la ruta:', error);
-        document.getElementById('loading').innerText = 'Error de conexión.';
-      }
+    if (!res.ok) {
+        throw new Error(`Servidor dice (${res.status}): ${rawText}`);
     }
 
+    // Ahora sí, intentamos parsear el texto que ya sabemos que es OK
+    const data = JSON.parse(rawText);
+    
+    // Si llegamos aquí, ¡éxito!
+    console.log("JSON parseado correctamente:", data);
+
+} catch (e) {
+    console.error("Detalle del fallo:", e.message);
+    document.body.innerHTML = `<div style="color:red; font-family:monospace; padding:20px;">
+        <h3>⚠️ Error detectado</h3>
+        <p>${e.message}</p>
+        <p>Mira la consola (F12) para ver la respuesta completa del servidor.</p>
+    </div>`;
+}
     // Arrancar la magia
     init();
   </script>
