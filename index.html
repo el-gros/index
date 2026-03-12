@@ -19,18 +19,27 @@
 
     #info-card {
       position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-      width: 92%; max-width: 400px; background: rgba(255, 255, 255, 0.95);
+      width: 92%; max-width: 450px; background: rgba(255, 255, 255, 0.95);
       backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
       border-radius: 24px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
       padding: 20px; box-sizing: border-box; display: none; z-index: 1000;
     }
 
     .title { font-size: 1.1rem; font-weight: 800; color: #1a1a1a; margin: 0 0 15px 0; }
-    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .stat-box { background: rgba(0,0,0,0.04); padding: 12px; border-radius: 16px; text-align: center; }
-    .stat-label { font-size: 0.65rem; font-weight: 800; text-transform: uppercase; color: #888; display: block; margin-bottom: 4px; }
-    .stat-val { font-size: 1.1rem; font-weight: 700; color: #2dd36f; }
-    .stat-unit { font-size: 0.75rem; color: #888; font-weight: 400; }
+    
+    /* Nueva rejilla de 2x2 */
+    .stats-grid { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 10px; 
+    }
+    
+    .stat-box { background: rgba(0,0,0,0.04); padding: 10px; border-radius: 16px; text-align: center; }
+    .stat-label { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: #888; display: block; margin-bottom: 2px; }
+    
+    /* Cambio de Color a Rojo */
+    .stat-val { font-size: 1rem; font-weight: 700; color: #ff3b30; }
+    .stat-unit { font-size: 0.7rem; color: #888; font-weight: 400; }
 
     #loading {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -52,8 +61,16 @@
         <span class="stat-val"><span id="r-dist">---</span> <span class="stat-unit">km</span></span>
       </div>
       <div class="stat-box">
-        <span class="stat-label">Desnivel</span>
-        <span class="stat-val">+<span id="r-ele">---</span> <span class="stat-unit">m</span></span>
+        <span class="stat-label">Tiempo</span>
+        <span class="stat-val" id="r-time">---</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Desnivel +</span>
+        <span class="stat-val"><span id="r-gain">---</span> <span class="stat-unit">m</span></span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Desnivel -</span>
+        <span class="stat-val"><span id="r-loss">---</span> <span class="stat-unit">m</span></span>
       </div>
     </div>
   </div>
@@ -61,11 +78,18 @@
   <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
 
   <script>
-    // 1. Activar modo Geográfico para usar Lon/Lat directamente
     ol.proj.useGeographic();
 
     const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
+
+    // Función auxiliar para convertir segundos a formato legible
+    function formatDuration(seconds) {
+      if (!seconds) return '---';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
@@ -78,64 +102,55 @@
       }
 
       try {
-        // 2. CONSULTA A LA API
         const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
           headers: {
             'apikey': SUPABASE_KEY,
             'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Accept': 'application/geo+json' // Importante: Esto devuelve un FeatureCollection
+            'Accept': 'application/geo+json'
           }
         });
 
-        if (!response.ok) throw new Error("No se pudo conectar con la base de datos");
+        if (!response.ok) throw new Error("No se pudo conectar");
         
         const geojsonData = await response.json();
-
-        // 3. LEER FEATURES (Usamos readFeatures en plural)
         const features = new ol.format.GeoJSON().readFeatures(geojsonData);
 
-        if (features.length === 0) {
-          throw new Error("Ruta no encontrada o geometría vacía");
-        }
+        if (features.length === 0) throw new Error("Ruta no encontrada");
 
         const routeFeature = features[0];
-        // En formato GeoJSON de Supabase, los datos están en 'properties'
         const props = routeFeature.getProperties();
 
-        // 4. ACTUALIZAR INTERFAZ
+        // --- ASIGNAR DATOS ---
         document.getElementById('r-name').innerText = props.name || 'Ruta Compartida';
         
-        const dist = props.stats?.distance ? (props.stats.distance / 1000).toFixed(2) : '---';
-        const ele = props.stats?.elevationGain ? Math.round(props.stats.elevationGain) : '---';
+        // Distancia (Asumiendo que viene en metros, convertimos a km)
+        const rawDist = props.stats?.distance || 0;
+        document.getElementById('r-dist').innerText = (rawDist / 1000).toFixed(2);
         
-        document.getElementById('r-dist').innerText = dist;
-        document.getElementById('r-ele').innerText = ele;
+        // Tiempo
+        document.getElementById('r-time').innerText = formatDuration(props.stats?.time);
+        
+        // Desniveles
+        document.getElementById('r-gain').innerText = Math.round(props.stats?.elevationGain || 0);
+        document.getElementById('r-loss').innerText = Math.round(props.stats?.elevationLoss || 0);
 
         loadingEl.style.display = 'none';
         document.getElementById('info-card').style.display = 'block';
 
-        // 5. RENDERIZAR MAPA
         const map = new ol.Map({
           target: 'map',
           layers: [
-            new ol.layer.Tile({ 
-              source: new ol.source.OSM({
-                attributions: [] // Limpiar atribuciones para diseño limpio
-              }) 
-            })
+            new ol.layer.Tile({ source: new ol.source.OSM({ attributions: [] }) })
           ],
-          view: new ol.View({
-            center: [0, 0],
-            zoom: 2
-          }),
+          view: new ol.View({ center: [0, 0], zoom: 2 }),
           controls: []
         });
 
-        // Aplicar estilo a la ruta
+        // --- ESTILO ROJO PARA LA RUTA ---
         routeFeature.setStyle(new ol.style.Style({
           stroke: new ol.style.Stroke({
-            color: '#2dd36f',
-            width: 6,
+            color: '#ff3b30', // Rojo Apple/iOS
+            width: 5,
             lineCap: 'round'
           })
         }));
@@ -143,16 +158,13 @@
         const vectorSource = new ol.source.Vector({ features: [routeFeature] });
         map.addLayer(new ol.layer.Vector({ source: vectorSource }));
 
-        // 6. ZOOM AUTOMÁTICO
         map.getView().fit(vectorSource.getExtent(), {
-          padding: [60, 60, 220, 60],
+          padding: [60, 60, 250, 60], // Más padding abajo para la tarjeta 2x2
           duration: 1200
         });
 
       } catch (error) {
-        console.error('Error detallado:', error);
-        loadingEl.innerHTML = `⚠️ Error al cargar la ruta.<br><small>${error.message}</small>`;
-        loadingEl.style.color = 'red';
+        loadingEl.innerHTML = `⚠️ Error.<br><small>${error.message}</small>`;
       }
     }
 
