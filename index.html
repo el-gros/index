@@ -20,7 +20,7 @@
     .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .stat-box { background: rgba(0,0,0,0.05); padding: 10px; border-radius: 16px; text-align: center; }
     .stat-label { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: #999; display: block; margin-bottom: 2px; }
-    .stat-val { font-size: 1.1rem; font-weight: 700; color: #ff3b30; } /* ROJO */
+    .stat-val { font-size: 1.1rem; font-weight: 700; color: #ff3b30; }
     .stat-unit { font-size: 0.7rem; color: #999; }
     #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: 600; background: white; padding: 15px 25px; border-radius: 30px; z-index: 2000; }
   </style>
@@ -44,12 +44,28 @@
     const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
 
-function formatTime(s) {
+    function formatTime(s) {
       if (!s) return '--';
-      if (s > 200000) s = Math.floor(s / 1000); // Corrección milisegundos
+      if (s > 200000) s = Math.floor(s / 1000);
       const h = Math.floor(s / 3600);
       const m = Math.floor((s % 3600) / 60);
       return h > 0 ? `${h}h ${m}m` : `${m}min`;
+    }
+
+    // Función para crear el estilo de los pines
+    function createPinStyle(color) {
+      return new ol.style.Style({
+        image: new ol.style.Icon({
+          anchor: [0.5, 1],
+          scale: 1.2,
+          src: 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+            <svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="${color}"/>
+              <circle cx="12" cy="9" r="2.5" fill="white"/>
+            </svg>
+          `)
+        })
+      });
     }
 
     async function init() {
@@ -65,7 +81,7 @@ function formatTime(s) {
         const feature = features[0];
         const p = feature.getProperties();
 
-        // Asignación de datos con corrección de unidades
+        // 1. Datos UI
         document.getElementById('r-name').innerText = p.name || 'Ruta';
         const d = p.stats?.distance || 0;
         document.getElementById('r-dist').innerText = (d > 100 ? d / 1000 : d).toFixed(2);
@@ -76,6 +92,7 @@ function formatTime(s) {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('info-card').style.display = 'block';
 
+        // 2. Mapa
         const map = new ol.Map({
           target: 'map',
           layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
@@ -83,13 +100,23 @@ function formatTime(s) {
           controls: []
         });
 
+        // 3. Estilo de la ruta (Línea Roja)
         feature.setStyle(new ol.style.Style({
-          stroke: new ol.style.Stroke({ color: '#ff3b30', width: 5, lineCap: 'round' })
+          stroke: new ol.style.Stroke({ color: '#ff3b30', width: 6, lineCap: 'round' })
         }));
 
-        const source = new ol.source.Vector({ features: [feature] });
+        // 4. Crear Pines (Inicio y Fin)
+        const coords = feature.getGeometry().getCoordinates();
+        const startPoint = new ol.Feature({ geometry: new ol.geom.Point(coords[0]) });
+        const endPoint = new ol.Feature({ geometry: new ol.geom.Point(coords[coords.length - 1]) });
+
+        startPoint.setStyle(createPinStyle('#2dd36f')); // Verde
+        endPoint.setStyle(createPinStyle('#ff3b30'));   // Rojo
+
+        // 5. Agregar todo al mapa
+        const source = new ol.source.Vector({ features: [feature, startPoint, endPoint] });
         map.addLayer(new ol.layer.Vector({ source }));
-        map.getView().fit(source.getExtent(), { padding: [50, 50, 250, 50], duration: 1000 });
+        map.getView().fit(source.getExtent(), { padding: [80, 80, 280, 80], duration: 1200 });
 
       } catch (e) { console.error(e); }
     }
