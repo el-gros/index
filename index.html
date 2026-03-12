@@ -17,7 +17,6 @@
 
     #map { width: 100vw; height: 100vh; position: absolute; }
 
-    /* Tarjeta flotante estilo PasoApp */
     #info-card {
       position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
       width: 92%; max-width: 400px; background: rgba(255, 255, 255, 0.95);
@@ -43,7 +42,6 @@
 <body>
 
   <div id="loading">🛰️ Localizando ruta...</div>
-
   <div id="map"></div>
 
   <div id="info-card">
@@ -63,10 +61,9 @@
   <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
 
   <script>
-    // 1. IMPORTANTE: Activar modo Geográfico para usar Lon/Lat directamente
+    // 1. Activar modo Geográfico para usar Lon/Lat directamente
     ol.proj.useGeographic();
 
-    // 2. CONFIGURACIÓN SUPABASE
     const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
 
@@ -81,33 +78,34 @@
       }
 
       try {
-        // 3. CONSULTA A LA API
+        // 2. CONSULTA A LA API
         const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
           headers: {
             'apikey': SUPABASE_KEY,
             'Authorization': `Bearer ${SUPABASE_KEY}`,
-            'Accept': 'application/geo+json', // Forzamos formato GeoJSON
-            'Prefer': 'plurality=singular'   // Recibir objeto directo, no array
+            'Accept': 'application/geo+json' // Importante: Esto devuelve un FeatureCollection
           }
         });
 
         if (!response.ok) throw new Error("No se pudo conectar con la base de datos");
         
-        let data = await response.json();
-        
-        // Si por casualidad devuelve un array, tomamos el primer elemento
-        if (Array.isArray(data)) data = data[0];
+        const geojsonData = await response.json();
 
-        if (!data) throw new Error("Ruta no encontrada");
+        // 3. LEER FEATURES (Usamos readFeatures en plural)
+        const features = new ol.format.GeoJSON().readFeatures(geojsonData);
 
-        // 4. PROCESAR DATOS (Null-safe)
-        // En formato GeoJSON, las columnas normales están en 'properties'
-        const props = data.properties || data;
-        const geometry = data.geometry || data.track_line;
+        if (features.length === 0) {
+          throw new Error("Ruta no encontrada o geometría vacía");
+        }
 
+        const routeFeature = features[0];
+        // En formato GeoJSON de Supabase, los datos están en 'properties'
+        const props = routeFeature.getProperties();
+
+        // 4. ACTUALIZAR INTERFAZ
         document.getElementById('r-name').innerText = props.name || 'Ruta Compartida';
         
-        const dist = props.stats?.distance ? props.stats.distance.toFixed(2) : '---';
+        const dist = props.stats?.distance ? (props.stats.distance / 1000).toFixed(2) : '---';
         const ele = props.stats?.elevationGain ? Math.round(props.stats.elevationGain) : '---';
         
         document.getElementById('r-dist').innerText = dist;
@@ -120,32 +118,34 @@
         const map = new ol.Map({
           target: 'map',
           layers: [
-            new ol.layer.Tile({ source: new ol.source.OSM() })
+            new ol.layer.Tile({ 
+              source: new ol.source.OSM({
+                attributions: [] // Limpiar atribuciones para diseño limpio
+              }) 
+            })
           ],
           view: new ol.View({
-            center: [0, 0], // En modo Geographic es [Longitud, Latitud]
+            center: [0, 0],
             zoom: 2
           }),
           controls: []
         });
 
-        // Leer la geometría (ya viene en GeoJSON gracias al Header Accept)
-        const feature = new ol.format.GeoJSON().readFeature(data);
-
-        feature.setStyle(new ol.style.Style({
+        // Aplicar estilo a la ruta
+        routeFeature.setStyle(new ol.style.Style({
           stroke: new ol.style.Stroke({
-            color: '#2dd36f', // Verde PasoApp
+            color: '#2dd36f',
             width: 6,
             lineCap: 'round'
           })
         }));
 
-        const vectorSource = new ol.source.Vector({ features: [feature] });
+        const vectorSource = new ol.source.Vector({ features: [routeFeature] });
         map.addLayer(new ol.layer.Vector({ source: vectorSource }));
 
-        // 6. ZOOM AUTOMÁTICO A LA RUTA
+        // 6. ZOOM AUTOMÁTICO
         map.getView().fit(vectorSource.getExtent(), {
-          padding: [60, 60, 220, 60], // Margen para que no tape la tarjeta
+          padding: [60, 60, 220, 60],
           duration: 1200
         });
 
@@ -156,7 +156,6 @@
       }
     }
 
-    // Iniciar
     init();
   </script>
 </body>
