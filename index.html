@@ -1,76 +1,163 @@
-// --- 1. CONFIGURACIÓN SUPABASE ---
-const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Visor de Ruta - PasoApp</title>
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
 
-async function init() {
-  const params = new URLSearchParams(window.location.search);
-  const routeId = params.get('id');
-  const loading = document.getElementById('loading');
+  <style>
+    body, html { 
+      margin: 0; padding: 0; width: 100%; height: 100%; 
+      font-family: 'Inter', sans-serif; background-color: #121212; 
+      overflow: hidden; 
+    }
 
-  if (!routeId) {
-    loading.innerText = 'Error: ID no encontrado.';
-    return;
-  }
+    #map { width: 100vw; height: 100vh; position: absolute; }
 
-  try {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Accept': 'application/geo+json', // Formato oficial de mapas
-        'Prefer': 'plurality=singular'   // Un solo objeto, no una lista
+    /* Tarjeta flotante estilo PasoApp */
+    #info-card {
+      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+      width: 92%; max-width: 400px; background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-radius: 24px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+      padding: 20px; box-sizing: border-box; display: none; z-index: 1000;
+    }
+
+    .title { font-size: 1.1rem; font-weight: 800; color: #1a1a1a; margin: 0 0 15px 0; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stat-box { background: rgba(0,0,0,0.04); padding: 12px; border-radius: 16px; text-align: center; }
+    .stat-label { font-size: 0.65rem; font-weight: 800; text-transform: uppercase; color: #888; display: block; margin-bottom: 4px; }
+    .stat-val { font-size: 1.1rem; font-weight: 700; color: #2dd36f; }
+    .stat-unit { font-size: 0.75rem; color: #888; font-weight: 400; }
+
+    #loading {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      font-weight: 600; color: #333; background: white; padding: 15px 25px; 
+      border-radius: 30px; box-shadow: 0 8px 20px rgba(0,0,0,0.2); z-index: 2000;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading">🛰️ Localizando ruta...</div>
+
+  <div id="map"></div>
+
+  <div id="info-card">
+    <h2 class="title" id="r-name">Cargando...</h2>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <span class="stat-label">Distancia</span>
+        <span class="stat-val"><span id="r-dist">---</span> <span class="stat-unit">km</span></span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Desnivel</span>
+        <span class="stat-val">+<span id="r-ele">---</span> <span class="stat-unit">m</span></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+
+  <script>
+    // 1. IMPORTANTE: Activar modo Geográfico para usar Lon/Lat directamente
+    ol.proj.useGeographic();
+
+    // 2. CONFIGURACIÓN SUPABASE
+    const SUPABASE_URL = 'https://xvezdemtphqwgjukjhan.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh2ZXpkZW10cGhxd2dqdWtqaGFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4OTQxMTYsImV4cCI6MjA3ODQ3MDExNn0.ayOgM2MIXJiW_q4AbAyQ4KzgiiNEF5o7sQLr2d_oX1E';
+
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const routeId = params.get('id');
+      const loadingEl = document.getElementById('loading');
+
+      if (!routeId) {
+        loadingEl.innerText = '❌ Error: Enlace sin ID.';
+        return;
       }
-    });
 
-    if (!response.ok) throw new Error("Error en Supabase");
-    const data = await response.json();
+      try {
+        // 3. CONSULTA A LA API
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/shared_routes?id=eq.${routeId}&select=*`, {
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Accept': 'application/geo+json', // Forzamos formato GeoJSON
+            'Prefer': 'plurality=singular'   // Recibir objeto directo, no array
+          }
+        });
 
-    // 🚀 EXPLICACIÓN: Con 'application/geo+json', los datos están en 'properties'
-    const props = data.properties || data; 
-    const geometry = data.geometry || data.track_line;
+        if (!response.ok) throw new Error("No se pudo conectar con la base de datos");
+        
+        let data = await response.json();
+        
+        // Si por casualidad devuelve un array, tomamos el primer elemento
+        if (Array.isArray(data)) data = data[0];
 
-    // 1. Pintar Textos
-    document.getElementById('r-name').innerText = props.name || 'Ruta PasoApp';
-    document.getElementById('r-desc').innerText = props.description || '';
-    
-    // Stats con seguridad
-    const d = props.stats?.distance ? props.stats.distance.toFixed(2) : '---';
-    const e = props.stats?.elevationGain ? Math.round(props.stats.elevationGain) : '---';
-    document.getElementById('r-dist').innerHTML = `${d} <span>km</span>`;
-    document.getElementById('r-ele').innerHTML = `+${e} <span>m</span>`;
+        if (!data) throw new Error("Ruta no encontrada");
 
-    loading.style.display = 'none';
-    document.getElementById('info-card').style.display = 'block';
+        // 4. PROCESAR DATOS (Null-safe)
+        // En formato GeoJSON, las columnas normales están en 'properties'
+        const props = data.properties || data;
+        const geometry = data.geometry || data.track_line;
 
-    // 2. Dibujar Mapa
-    const map = new ol.Map({
-      target: 'map',
-      layers: [new ol.layer.Tile({ source: new ol.source.OSM() })],
-      view: new ol.View({ center: [0, 0], zoom: 2 }),
-      controls: []
-    });
+        document.getElementById('r-name').innerText = props.name || 'Ruta Compartida';
+        
+        const dist = props.stats?.distance ? props.stats.distance.toFixed(2) : '---';
+        const ele = props.stats?.elevationGain ? Math.round(props.stats.elevationGain) : '---';
+        
+        document.getElementById('r-dist').innerText = dist;
+        document.getElementById('r-ele').innerText = ele;
 
-    // 🚀 LA CLAVE: Le pasamos el objeto 'data' entero porque YA ES un GeoJSON
-    const feature = new ol.format.GeoJSON().readFeature(data, {
-      dataProjection: 'EPSG:4326',
-      featureProjection: 'EPSG:3857'
-    });
+        loadingEl.style.display = 'none';
+        document.getElementById('info-card').style.display = 'block';
 
-    feature.setStyle(new ol.style.Style({
-      stroke: new ol.style.Stroke({ color: '#2dd36f', width: 6 })
-    }));
+        // 5. RENDERIZAR MAPA
+        const map = new ol.Map({
+          target: 'map',
+          layers: [
+            new ol.layer.Tile({ source: new ol.source.OSM() })
+          ],
+          view: new ol.View({
+            center: [0, 0], // En modo Geographic es [Longitud, Latitud]
+            zoom: 2
+          }),
+          controls: []
+        });
 
-    const source = new ol.source.Vector({ features: [feature] });
-    map.addLayer(new ol.layer.Vector({ source: source }));
-    
-    // Zoom a la ruta
-    map.getView().fit(source.getExtent(), { 
-      padding: [60, 60, 200, 60], 
-      duration: 1000 
-    });
+        // Leer la geometría (ya viene en GeoJSON gracias al Header Accept)
+        const feature = new ol.format.GeoJSON().readFeature(data);
 
-  } catch (error) {
-    console.error('Error:', error);
-    loading.innerText = 'Error al procesar la ruta.';
-  }
-}
+        feature.setStyle(new ol.style.Style({
+          stroke: new ol.style.Stroke({
+            color: '#2dd36f', // Verde PasoApp
+            width: 6,
+            lineCap: 'round'
+          })
+        }));
+
+        const vectorSource = new ol.source.Vector({ features: [feature] });
+        map.addLayer(new ol.layer.Vector({ source: vectorSource }));
+
+        // 6. ZOOM AUTOMÁTICO A LA RUTA
+        map.getView().fit(vectorSource.getExtent(), {
+          padding: [60, 60, 220, 60], // Margen para que no tape la tarjeta
+          duration: 1200
+        });
+
+      } catch (error) {
+        console.error('Error detallado:', error);
+        loadingEl.innerHTML = `⚠️ Error al cargar la ruta.<br><small>${error.message}</small>`;
+        loadingEl.style.color = 'red';
+      }
+    }
+
+    // Iniciar
+    init();
+  </script>
+</body>
+</html>
